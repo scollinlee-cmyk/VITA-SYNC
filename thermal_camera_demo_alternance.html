@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Caméra Thermique Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #000;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+        }
+
+        #videoContainer {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            aspect-ratio: 4/3;
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        body.fullscreen #videoContainer {
+            max-width: 100%;
+            width: 100vw;
+            height: 100vh;
+            border-radius: 0;
+            aspect-ratio: auto;
+        }
+
+        #video {
+            display: none;
+        }
+
+        #canvas {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        #detectionBox {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 560px;
+            height: 560px;
+            border: 2px solid #fff;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        #detectionBox.show {
+            opacity: 1;
+        }
+
+        #detectionBox.scanning,
+        #detectionBox.infected {
+            border-color: #ffffff;
+            box-shadow: 0 0 30px rgba(255, 255, 255, 0.6);
+        }
+
+        #detectionBox.detected {
+            border-color: #00ff88;
+            background: rgba(0, 255, 136, 0.5);
+            box-shadow: 0 0 30px rgba(0, 255, 136, 0.6);
+        }
+
+        #detectionBox.infected {
+            border-color: #ff3366;
+            box-shadow: 0 0 30px rgba(255, 51, 102, 0.8);
+            opacity: 0.9;
+        }
+
+        /* 四角标记 */
+        #detectionBox::before,
+        #detectionBox::after {
+            content: '';
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            border: 2px solid;
+            border-color: inherit;
+        }
+
+        #detectionBox::before {
+            top: -4px;
+            left: -4px;
+            border-right: none;
+            border-bottom: none;
+        }
+
+        #detectionBox::after {
+            top: -4px;
+            right: -4px;
+            border-left: none;
+            border-bottom: none;
+        }
+
+        .corner-bottom {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            border: 2px solid;
+            border-color: inherit;
+        }
+
+        .corner-bottom-left {
+            bottom: -4px;
+            left: -4px;
+            border-right: none;
+            border-top: none;
+        }
+
+        .corner-bottom-right {
+            bottom: -4px;
+            right: -4px;
+            border-left: none;
+            border-top: none;
+        }
+
+        #detectionText {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 10px 20px;
+            border-radius: 10px;
+            color: #fff;
+            font-size: 18px;
+            font-weight: bold;
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+
+        #detectionText.show {
+            opacity: 1;
+        }
+
+        #detectionText.scanning,
+        #detectionText.detected {
+            color: #ffffff;
+            border: 2px solid #ffffff;
+        }
+
+        #detectionText.infected {
+            color: #ff3366;
+            border: 3px solid #ff3366;
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(10px);
+            font-size: 24px;
+            font-weight: 700;
+            padding: 20px 40px;
+            width: 640px;
+            white-space: pre-line;
+            text-align: center;
+            line-height: 1.5;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            opacity: 1;
+            animation: pulseText 1s ease-in-out infinite;
+        }
+
+        @keyframes pulseText {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.05); }
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.9; }
+        }
+
+        /* 白色对勾图标 */
+        #checkmark {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 500px;
+            height: 500px;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
+
+        #checkmark.show {
+            opacity: 1;
+        }
+
+        #checkmark svg {
+            width: 100%;
+            height: 100%;
+            filter: drop-shadow(0 0 20px rgba(255, 255, 255, 0.8));
+        }
+
+        #checkmark circle {
+            stroke: #ffffff;
+            stroke-width: 12;
+            fill: none;
+            stroke-dasharray: 1570;
+            stroke-dashoffset: 1570;
+        }
+
+        #checkmark.show circle {
+            animation: drawCircle 0.6s ease-out forwards;
+        }
+
+        #checkmark polyline {
+            stroke: #ffffff;
+            stroke-width: 12;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            stroke-dasharray: 600;
+            stroke-dashoffset: 600;
+        }
+
+        #checkmark.show polyline {
+            animation: drawCheck 0.4s 0.3s ease-out forwards;
+        }
+
+        @keyframes drawCircle {
+            to {
+                stroke-dashoffset: 0;
+            }
+        }
+
+        @keyframes drawCheck {
+            to {
+                stroke-dashoffset: 0;
+            }
+        }
+
+        /* 对勾下方的白色文字 - 在识别框外下方 */
+        #checkmarkText {
+            position: absolute;
+            top: calc(50% + 280px + 30px);
+            left: 50%;
+            transform: translateX(-50%);
+            width: 640px;
+            color: #ffffff;
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            text-align: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            text-shadow: 0 0 15px rgba(255, 255, 255, 0.6);
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(10px);
+            padding: 15px 30px;
+            border-radius: 10px;
+        }
+
+        #checkmarkText.show {
+            opacity: 1;
+        }
+
+        #overlay {
+            position: absolute;
+            top: 56px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 80px;
+            align-items: center;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #branding {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        #branding h1 {
+            font-size: 32px;
+            font-weight: 900;
+            color: #ffffff;
+            letter-spacing: 4px;
+            margin: 0;
+            text-shadow: 0 0 20px rgba(255, 255, 255, 0.5);
+            font-family: 'Arial Black', sans-serif;
+        }
+
+        #branding h2 {
+            font-size: 20px;
+            font-weight: 400;
+            color: rgba(255, 255, 255, 0.9);
+            letter-spacing: 1px;
+            margin: 5px 0 0 2px;
+            text-transform: uppercase;
+            max-width: 500px;
+            line-height: 1.4;
+        }
+
+        #slogan {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 10;
+            pointer-events: none;
+            text-align: right;
+        }
+
+        #slogan p {
+            font-size: 18px;
+            font-weight: 400;
+            color: rgba(255, 255, 255, 0.9);
+            letter-spacing: 1px;
+            margin: 0;
+            text-transform: uppercase;
+            max-width: 450px;
+            line-height: 1.8;
+        }
+
+        #tempDisplay {
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            padding: 15px 25px;
+            border-radius: 15px;
+            color: #fff;
+            font-size: 24px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #statusDisplay {
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            padding: 15px 25px;
+            border-radius: 15px;
+            font-size: 20px;
+            font-weight: bold;
+            border: 2px solid;
+            transition: all 0.3s ease;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #statusDisplay.normal {
+            color: #00ff88;
+            border-color: #00ff88;
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+        }
+
+        #statusDisplay.anormal {
+            color: #ff3366;
+            border-color: #ff3366;
+            box-shadow: 0 0 20px rgba(255, 51, 102, 0.5);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+            z-index: 10;
+        }
+
+        button {
+            padding: 12px 30px;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.9);
+            color: #1e3c72;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
+            background: #fff;
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        #startBtn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        #fullscreenBtn {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+        }
+
+        #legend {
+            position: absolute;
+            bottom: 100px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(10px);
+            padding: 15px;
+            border-radius: 10px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            z-index: 10;
+        }
+
+        #legend h4 {
+            color: #fff;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+
+        #gradient {
+            width: 200px;
+            height: 20px;
+            background: linear-gradient(to right, 
+                #0000ff 0%,
+                #00ffff 20%,
+                #00ff00 40%,
+                #ffff00 60%,
+                #ff8800 80%,
+                #ff0000 100%
+            );
+            border-radius: 5px;
+            margin-bottom: 5px;
+        }
+
+        #gradientLabels {
+            display: flex;
+            justify-content: space-between;
+            color: #fff;
+            font-size: 11px;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 20px;
+            text-align: center;
+        }
+
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid white;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <div id="videoContainer">
+            <video id="video" autoplay playsinline></video>
+            <canvas id="canvas"></canvas>
+            
+            <!-- 品牌标题 -->
+            <div id="branding">
+                <h1>VITA-SYNC</h1>
+                <h2>Système de Régulation Biopolitique<br>et de Prédiction Pathogène</h2>
+            </div>
+
+            <!-- 右上角标语 -->
+            <div id="slogan">
+                <p>Votre souffle, notre avenir.<br>Agir ensemble pour ceux que nous aimons.</p>
+            </div>
+            
+            <!-- 模拟识别框 -->
+            <div id="detectionBox">
+                <div class="corner-bottom corner-bottom-left"></div>
+                <div class="corner-bottom corner-bottom-right"></div>
+                <div id="detectionText"></div>
+                
+                <!-- 白色对勾图标 -->
+                <div id="checkmark">
+                    <svg viewBox="0 0 500 500">
+                        <circle cx="250" cy="250" r="230"/>
+                        <polyline points="120,250 210,340 380,160"/>
+                    </svg>
+                </div>
+                
+                <!-- 对勾下方文字 -->
+                <div id="checkmarkText">Indicateurs normaux</div>
+            </div>
+
+            <div id="overlay">
+                <div id="tempDisplay">🌡️ --°C</div>
+                <div id="statusDisplay" class="normal">NORMAL</div>
+            </div>
+
+            <div id="legend">
+                <h4>Cartographie thermique</h4>
+                <div id="gradient"></div>
+                <div id="gradientLabels">
+                    <span>Basse</span>
+                    <span>Haute</span>
+                </div>
+            </div>
+
+            <div id="loading">
+                <div class="spinner"></div>
+                <p>Initialisation de la caméra...</p>
+            </div>
+        </div>
+
+        <div id="controls">
+            <button id="startBtn">Démarrer la caméra</button>
+            <button id="fullscreenBtn">Mode plein écran</button>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const tempDisplay = document.getElementById('tempDisplay');
+        const statusDisplay = document.getElementById('statusDisplay');
+        const startBtn = document.getElementById('startBtn');
+        const fullscreenBtn = document.getElementById('fullscreenBtn');
+        const loading = document.getElementById('loading');
+        const detectionBox = document.getElementById('detectionBox');
+        const detectionText = document.getElementById('detectionText');
+        const checkmark = document.getElementById('checkmark');
+        const checkmarkText = document.getElementById('checkmarkText');
+
+        let stream = null;
+        let animationId = null;
+        let detectionEnabled = false;
+        let detectionInterval = null;
+        let forceAnormalStatus = false; // 强制显示异常状态的标志
+
+        // 热成像颜色映射 - 减少绿色，增加蓝色和红橙黄
+        function getHeatColor(intensity) {
+            const normalized = intensity / 255;
+            
+            let r, g, b;
+            
+            if (normalized < 0.35) {
+                // 深蓝到浅蓝 (更大范围)
+                const t = normalized / 0.35;
+                r = 0;
+                g = Math.floor(100 * t);
+                b = 255;
+            } else if (normalized < 0.45) {
+                // 浅蓝到青色 (缩小绿色范围)
+                const t = (normalized - 0.35) / 0.1;
+                r = 0;
+                g = Math.floor(100 + 155 * t);
+                b = 255;
+            } else if (normalized < 0.55) {
+                // 青色快速过渡到黄色 (跳过纯绿)
+                const t = (normalized - 0.45) / 0.1;
+                r = Math.floor(255 * t);
+                g = 255;
+                b = Math.floor(255 * (1 - t));
+            } else if (normalized < 0.75) {
+                // 黄色到橙色 (增加范围)
+                const t = (normalized - 0.55) / 0.2;
+                r = 255;
+                g = Math.floor(255 * (1 - t * 0.6));
+                b = 0;
+            } else {
+                // 橙色到红色 (增加范围)
+                const t = (normalized - 0.75) / 0.25;
+                r = 255;
+                g = Math.floor(100 * (1 - t));
+                b = 0;
+            }
+            
+            return [r, g, b];
+        }
+
+        // 应用热成像效果
+        function applyThermalEffect() {
+            if (!video.videoWidth) return;
+
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            
+            let totalIntensity = 0;
+            let pixelCount = 0;
+
+            for (let i = 0; i < data.length; i += 4) {
+                const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+                const [r, g, b] = getHeatColor(gray);
+                
+                data[i] = r;
+                data[i + 1] = g;
+                data[i + 2] = b;
+                
+                totalIntensity += gray;
+                pixelCount++;
+            }
+            
+            ctx.putImageData(imageData, 0, 0);
+            
+            // 更新温度显示
+            if (detectionEnabled && !forceAnormalStatus) {
+                const avgIntensity = totalIntensity / pixelCount;
+                const temperature = 30 + (avgIntensity / 255) * 15;
+                const isNormal = temperature < 37.5;
+                
+                tempDisplay.textContent = `🌡️ ${temperature.toFixed(1)}°C`;
+                statusDisplay.textContent = isNormal ? 'NORMAL' : 'ANORMAL';
+                statusDisplay.className = isNormal ? 'normal' : 'anormal';
+            } else if (detectionEnabled && forceAnormalStatus) {
+                // 异常状态下只更新温度，不改变状态
+                tempDisplay.textContent = '🌡️ 38.5°C';
+            }
+            
+            animationId = requestAnimationFrame(applyThermalEffect);
+        }
+
+        // 模拟识别循环
+        function startDetectionSimulation() {
+            let phase = 0; // 0: 隐藏, 1: 扫描中, 2: 已检测, 3: 等待
+            let cycleCount = 0; // 循环计数器
+            
+            function runDetectionCycle() {
+                if (!detectionEnabled) return;
+                
+                const isNormal = (cycleCount % 2 === 0); // 偶数次正常，奇数次异常（交替）
+                
+                switch(phase) {
+                    case 0: // 开始扫描
+                        detectionBox.className = 'show scanning';
+                        detectionText.className = 'show scanning';
+                        detectionText.textContent = 'Reconnaissance en cours';
+                        phase = 1;
+                        setTimeout(runDetectionCycle, 2000); // 2秒后
+                        break;
+                        
+                    case 1: // 显示检测结果
+                        if (isNormal) {
+                            // 正常情况 - 持续2秒，显示对勾和文字
+                            forceAnormalStatus = false; // 关闭强制异常模式
+                            detectionBox.className = 'show detected';
+                            detectionText.className = ''; // 隐藏扫描文字
+                            checkmark.className = 'show'; // 显示对勾
+                            checkmarkText.className = 'show'; // 显示对勾文字
+                            
+                            // 确保温度和状态显示为正常
+                            statusDisplay.textContent = 'NORMAL';
+                            statusDisplay.className = 'normal';
+                            
+                            phase = 2;
+                            setTimeout(runDetectionCycle, 2000); // 2秒后
+                        } else {
+                            // 异常情况 - 持续5秒
+                            forceAnormalStatus = true; // 开启强制异常模式
+                            detectionBox.className = 'show infected';
+                            detectionText.className = 'show infected';
+                            detectionText.textContent = 'Infection détectée\nVeuillez prendre le wagon dédié';
+                            checkmark.className = ''; // 隐藏对勾
+                            
+                            // 更新温度和状态显示为异常
+                            tempDisplay.textContent = '🌡️ 38.5°C';
+                            statusDisplay.textContent = 'ANORMAL';
+                            statusDisplay.className = 'anormal';
+                            
+                            phase = 2;
+                            setTimeout(runDetectionCycle, 5000); // 5秒后（异常持续5秒）
+                        }
+                        break;
+                        
+                    case 2: // 隐藏
+                        detectionBox.className = '';
+                        detectionText.className = '';
+                        checkmark.className = '';
+                        checkmarkText.className = '';
+                        
+                        // 恢复自动温度检测
+                        forceAnormalStatus = false;
+                        
+                        phase = 3;
+                        setTimeout(runDetectionCycle, 2000); // 2秒后
+                        break;
+                        
+                    case 3: // 重新开始
+                        cycleCount++; // 增加循环计数
+                        phase = 0;
+                        runDetectionCycle();
+                        break;
+                }
+            }
+            
+            runDetectionCycle();
+        }
+
+        // 启动摄像头
+        async function startCamera() {
+            try {
+                loading.style.display = 'block';
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                        facingMode: 'user'
+                    }
+                });
+                
+                video.srcObject = stream;
+                
+                video.onloadedmetadata = () => {
+                    loading.style.display = 'none';
+                    detectionEnabled = true;
+                    applyThermalEffect();
+                    startDetectionSimulation();
+                    startBtn.textContent = 'Arrêter la caméra';
+                    startBtn.style.background = 'linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%)';
+                };
+            } catch (err) {
+                loading.style.display = 'none';
+                alert('Impossible d\'accéder à la caméra: ' + err.message);
+                console.error(err);
+            }
+        }
+
+        // 停止摄像头
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+            detectionEnabled = false;
+            forceAnormalStatus = false;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            detectionBox.className = '';
+            detectionText.className = '';
+            checkmark.className = '';
+            checkmarkText.className = '';
+            tempDisplay.textContent = '🌡️ --°C';
+            statusDisplay.textContent = 'NORMAL';
+            statusDisplay.className = 'normal';
+            startBtn.textContent = 'Démarrer la caméra';
+            startBtn.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+        }
+
+        // 全屏切换
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.body.requestFullscreen().then(() => {
+                    document.body.classList.add('fullscreen');
+                    fullscreenBtn.textContent = 'Quitter le plein écran';
+                }).catch(err => {
+                    alert('Impossible d\'entrer en mode plein écran: ' + err.message);
+                });
+            } else {
+                document.exitFullscreen().then(() => {
+                    document.body.classList.remove('fullscreen');
+                    fullscreenBtn.textContent = 'Mode plein écran';
+                });
+            }
+        }
+
+        // 监听全屏变化
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement) {
+                document.body.classList.remove('fullscreen');
+                fullscreenBtn.textContent = 'Mode plein écran';
+            }
+        });
+
+        // 事件监听
+        startBtn.addEventListener('click', () => {
+            if (!stream) {
+                startCamera();
+            } else {
+                stopCamera();
+            }
+        });
+
+        fullscreenBtn.addEventListener('click', toggleFullscreen);
+
+        // 页面卸载时清理
+        window.addEventListener('beforeunload', () => {
+            stopCamera();
+        });
+    </script>
+</body>
+</html>
